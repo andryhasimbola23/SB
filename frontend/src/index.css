@@ -1,0 +1,507 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================ */
+/* 1. TOKENS SÉMANTIQUES                        */
+/*    Une seule source de vérité pour le thème.  */
+/* ============================================ */
+
+:root {
+    --surface: #ffffff;
+    --surface-2: #f8faf9;
+    --surface-3: #eef2f1;
+
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --text-subtle: #94a3b8;
+    --text-inverse: #ffffff;
+
+    --border: #e2e8f0;
+    --border-strong: #cbd5e1;
+
+    --input-bg: #ffffff;
+    --accent: #009640;
+    --danger: #e30613;
+    --warning: #f59e0b;
+    --overlay: rgba(15, 23, 42, 0.55);
+    --dot-pattern: rgba(16, 24, 40, 0.06);
+}
+
+html.dark {
+    --surface: #1e293b;
+    --surface-2: #16213a;
+    --surface-3: #0f172a;
+
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --text-subtle: #64748b;
+    --text-inverse: #0f172a;
+
+    --border: #293449;
+    --border-strong: #334155;
+
+    --input-bg: #16213a;
+    --accent: #00a651;
+    --overlay: rgba(2, 6, 23, 0.7);
+    --dot-pattern: rgba(255, 255, 255, 0.04);
+}
+
+/* ============================================ */
+/* 2. BASE                                      */
+/* ============================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: 'Montserrat', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--surface-2);
+    color: var(--text);
+    min-height: 100vh;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+img,
+svg {
+    max-width: 100%;
+}
+
+/* Champs de saisie : cohérence clair/sombre sans override large */
+input,
+select,
+textarea {
+    background-color: var(--input-bg);
+    color: var(--text);
+    border-color: var(--border);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-subtle);
+}
+
+select option {
+    background-color: var(--surface);
+    color: var(--text);
+}
+
+/* Accessibilité : focus visible cohérent partout */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Barre de défilement personnalisée */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-subtle);
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+/* ============================================ */
+/* 3. COMPOSANTS RÉUTILISABLES                  */
+/*    (via @layer pour rester surchargeables)   */
+/* ============================================ */
+
+@layer components {
+    /* --- Conteneurs --- */
+    .card {
+        @apply bg-surface border border-line rounded-card shadow-soft;
+    }
+
+    .card-head {
+        @apply flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-line;
+    }
+
+    .card-title {
+        @apply text-sm font-semibold text-ink;
+    }
+
+    .card-subtitle {
+        @apply text-xs text-ink-muted mt-0.5;
+    }
+
+    .page-title {
+        @apply text-lg sm:text-xl font-bold text-ink tracking-tight;
+    }
+
+    .page-subtitle {
+        @apply text-sm text-ink-muted;
+    }
+
+    /* --- Barre d'outils des listes --- */
+    .toolbar {
+        @apply flex flex-col sm:flex-row sm:items-center justify-between gap-3;
+    }
+
+    .search-field {
+        @apply relative flex-1 min-w-0;
+    }
+
+    /* --- Typographie --- */
+    .section-label {
+        @apply text-[10px] uppercase font-bold tracking-wider text-ink-subtle;
+    }
+
+    .field-label {
+        @apply block text-[13px] font-medium text-ink mb-1.5;
+    }
+
+    .field-error {
+        @apply text-xs text-danger-500 font-medium mt-1.5 animate-slide-down;
+    }
+
+    /* --- Champs --- */
+    .input {
+        @apply w-full px-3 py-2.5 text-sm text-ink bg-surface border border-line rounded-control
+               outline-none transition-all duration-150
+               placeholder:text-ink-subtle
+               hover:border-line-strong
+               focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15;
+    }
+
+    .input-error {
+        @apply border-danger-500 focus:border-danger-500 focus:ring-danger-500/15;
+    }
+
+    .input:disabled,
+    .input[readonly] {
+        @apply cursor-not-allowed bg-surface-2 text-ink-muted dark:bg-slate-800/60;
+    }
+
+    .input:disabled:hover,
+    .input[readonly]:hover {
+        @apply border-line;
+    }
+
+    /* --- Boutons --- */
+    .btn {
+        @apply inline-flex items-center justify-center gap-2 font-semibold
+               rounded-control text-sm whitespace-nowrap
+               transition-all duration-150
+               active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed
+               disabled:active:scale-100;
+    }
+
+    .btn-sm {
+        @apply px-3 py-1.5 text-xs;
+    }
+
+    .btn-md {
+        @apply px-4 py-2.5;
+    }
+
+    .btn-lg {
+        @apply px-5 py-3 text-[15px];
+    }
+
+    .btn-icon {
+        @apply p-2 rounded-full;
+    }
+
+    .btn-primary {
+        @apply btn bg-brand-500 text-white shadow-sm
+               hover:bg-brand-600 hover:shadow-brand
+               focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1;
+    }
+
+    .btn-secondary {
+        @apply btn bg-surface text-ink border border-line-strong
+               hover:bg-surface-3;
+    }
+
+    .btn-ghost {
+        @apply btn bg-transparent text-ink-muted
+               hover:bg-surface-3 hover:text-ink;
+    }
+
+    .btn-danger {
+        @apply btn bg-danger-500 text-white shadow-sm
+               hover:bg-danger-600;
+    }
+
+    .btn-danger-soft {
+        @apply btn bg-danger-50 dark:bg-danger-500/15 text-danger-600 dark:text-danger-300
+               border border-danger-200 dark:border-danger-500/30
+               hover:bg-danger-100 dark:hover:bg-danger-500/25;
+    }
+
+    .btn-neutral {
+        @apply btn bg-slate-800 text-white hover:bg-slate-700;
+    }
+
+    .btn-brand-soft {
+        @apply btn bg-brand-50 dark:bg-brand-500/15 text-brand-700 dark:text-brand-300
+               border border-brand-200 dark:border-brand-500/30
+               hover:bg-brand-100 dark:hover:bg-brand-500/25;
+    }
+
+    /* --- Badges --- */
+    .badge {
+        @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full
+               text-[11px] font-semibold whitespace-nowrap;
+    }
+
+    .badge::before {
+        content: '';
+        @apply w-1.5 h-1.5 rounded-full bg-current shrink-0;
+    }
+
+    .badge-plain::before {
+        @apply hidden;
+    }
+
+    .badge-brand {
+        @apply bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300;
+    }
+    .badge-danger {
+        @apply bg-danger-50 text-danger-700 dark:bg-danger-500/15 dark:text-danger-300;
+    }
+    .badge-warning {
+        @apply bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300;
+    }
+    .badge-neutral {
+        @apply bg-slate-100 text-slate-700 dark:bg-slate-700/60 dark:text-slate-300;
+    }
+    .badge-quiet {
+        @apply bg-slate-100 text-slate-600 dark:bg-slate-700/60 dark:text-slate-400;
+    }
+
+    /* --- Alertes --- */
+    .alert {
+        @apply flex items-start gap-3 p-4 rounded-panel border text-sm animate-slide-down;
+    }
+
+    .alert-danger {
+        @apply bg-danger-50 border-danger-200 text-danger-800 dark:bg-danger-500/10 dark:border-danger-500/30 dark:text-danger-200;
+    }
+    .alert-warning {
+        @apply bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200;
+    }
+    .alert-brand {
+        @apply bg-brand-50 border-brand-200 text-brand-800 dark:bg-brand-500/10 dark:border-brand-500/30 dark:text-brand-200;
+    }
+    .alert-neutral {
+        @apply bg-slate-50 border-line text-slate-700 dark:bg-slate-700/30 dark:text-slate-300;
+    }
+
+    /* --- États vides --- */
+    .empty-state {
+        @apply flex flex-col items-center justify-center text-center px-6 py-14 gap-2;
+    }
+
+    .empty-state-icon {
+        @apply w-14 h-14 rounded-full bg-surface-3 flex items-center justify-center text-ink-subtle mb-1;
+    }
+
+    /* --- Survols d'action — SOURCE UNIQUE (palette apaisée) ---
+       Règle de palette : le vert ne survit qu'aux actions primaires et
+       aux états actifs ; le rouge au destructif ; l'ambre à l'attention.
+       Tout survol non destructif est neutre. */
+    .act-quiet {
+        @apply text-ink-muted hover:text-ink transition-colors;
+    }
+    .act-quiet-bg {
+        @apply text-ink-muted hover:text-ink hover:bg-surface-3 transition-colors;
+    }
+    .act-danger {
+        @apply text-ink-muted hover:text-danger-600 dark:hover:text-danger-300 transition-colors;
+    }
+    .act-danger-bg {
+        @apply text-ink-muted hover:text-danger-600 dark:hover:text-danger-300
+               hover:bg-danger-50 dark:hover:bg-danger-500/15 transition-colors;
+    }
+    .act-brand {
+        @apply text-brand-600 dark:text-brand-300
+               bg-brand-50 dark:bg-brand-500/15
+               hover:bg-brand-100 dark:hover:bg-brand-500/25 transition-colors;
+    }
+
+    /* Tuiles cliquables — survol neutre (le vert est réservé à la
+       sélection active, pas au survol). */
+    .tile-hover {
+        @apply hover:border-ink-muted hover:bg-surface-3 transition-colors;
+    }
+
+    /* Codes uniques (n° d'inventaire, QR) — NEUTRES : un identifiant
+       n'est ni une action ni un statut, il n'a pas de couleur. */
+    .mono-code {
+        @apply font-mono text-ink-muted;
+    }
+    .mono-code-chip {
+        @apply mono-code bg-surface-3 rounded px-1.5 py-0.5;
+    }
+}
+
+/* ============================================ */
+/* 4. ANIMATIONS                               */
+/* ============================================ */
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInLeft {
+    from { opacity: 0; transform: translateX(-12px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(24px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(100%); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes softPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+@keyframes spinSlow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes bounceSubtle {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+@keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+.animate-fade-in-up { animation: fadeInUp 0.4s ease-out; }
+.animate-fade-in-left { animation: fadeInLeft 0.3s ease-out; }
+.animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-slide-down { animation: slideDown 0.2s ease-out; }
+.animate-slide-in-right { animation: slideInRight 0.3s ease-out; }
+.animate-soft-pulse { animation: softPulse 2s ease-in-out infinite; }
+.animate-spin-slow { animation: spinSlow 1.5s linear infinite; }
+.animate-bounce-subtle { animation: bounceSubtle 2s ease-in-out infinite; }
+.animate-shimmer {
+    background-image: linear-gradient(
+        90deg,
+        rgba(0, 150, 64, 0) 0%,
+        rgba(0, 150, 64, 0.7) 50%,
+        rgba(0, 150, 64, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+}
+
+/* ============================================ */
+/* 5. EFFETS                                   */
+/* ============================================ */
+
+.hover-lift {
+    transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+
+.hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px -8px rgba(16, 24, 40, 0.18);
+}
+
+.hover-scale {
+    transition: transform 0.2s ease-out;
+}
+
+.hover-scale:hover {
+    transform: scale(1.02);
+}
+
+/* Fond de page partagé (dashboard / pages / login) */
+.page-surface {
+    background:
+        radial-gradient(circle at 0% 0%, rgba(0, 150, 64, 0.10) 0%, transparent 45%),
+        radial-gradient(circle at 100% 100%, rgba(227, 6, 19, 0.07) 0%, transparent 45%),
+        linear-gradient(180deg, var(--surface-2) 0%, var(--surface-3) 100%);
+    background-attachment: local;
+    transition: background 0.3s ease;
+}
+
+.page-surface-dots::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(var(--dot-pattern) 1px, transparent 1px);
+    background-size: 22px 22px;
+    pointer-events: none;
+}
+
+/* Masquer le scroll horizontal des barres d'onglets */
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
