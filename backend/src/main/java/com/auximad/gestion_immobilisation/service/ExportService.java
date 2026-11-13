@@ -66,10 +66,14 @@ public class ExportService {
     @Value("${file.upload-dir:uploads}")
     private String uploadDir;
 
-    /** Marges de la fiche PDF, en points (1 pt ≈ 0,35 mm). */
-    private static final float MARGE_HAUTE = 38f;
-    private static final float MARGE_COTE = 42f;
-    private static final float MARGE_BASSE = 54f;
+    /** Marges de la fiche PDF, en points (1 pt ≈ 0,35 mm) — fiche sur une seule page. */
+    private static final float MARGE_HAUTE = 24f;
+    private static final float MARGE_COTE = 40f;
+    private static final float MARGE_BASSE = 38f;
+
+    /** Longueurs maximales des textes libres affichés — garantit la page unique. */
+    private static final int MAX_DESIGNATION_PDF = 70;
+    private static final int MAX_DESCRIPTION_PDF = 280;
 
     /** Nombre de mouvements affichés dans l'historique de la fiche. */
     private static final int NB_MOUVEMENTS_FICHE = 5;
@@ -483,20 +487,20 @@ public class ExportService {
         Image logo = chargerImageClasspath("static/logo_auximad.png");
         if (logo != null) {
             marqueCell.add(new Paragraph()
-                    .add(logo.scaleToFit(44, 44))
+                    .add(logo.scaleToFit(38, 38))
                     .setMarginBottom(2));
         }
-        marqueCell.add(new Paragraph("AUXIMAD").setFontSize(19).setBold().setFontColor(redColor));
+        marqueCell.add(new Paragraph("AUXIMAD").setFontSize(17).setBold().setFontColor(redColor));
         marqueCell.add(new Paragraph("Gestion des Immobilisations")
                 .setFontSize(8).setFontColor(ColorConstants.GRAY));
         headerTable.addCell(marqueCell);
 
         headerTable.addCell(new com.itextpdf.layout.element.Cell()
                 .add(new Paragraph("FICHE D'IMMOBILISATION")
-                        .setFontSize(15).setBold()
+                        .setFontSize(14).setBold()
                         .setTextAlignment(TextAlignment.CENTER)
                         .setFontColor(darkColor)
-                        .setMarginTop(6))
+                        .setMarginTop(4))
                 .add(new Paragraph("Détail du bien, valeurs et historique")
                         .setFontSize(8)
                         .setTextAlignment(TextAlignment.CENTER)
@@ -515,9 +519,9 @@ public class ExportService {
         document.add(headerTable);
 
         // Filet bicolore aux couleurs de la marque
-        document.add(new Paragraph(" ").setFontSize(1).setMarginTop(6).setMarginBottom(0)
+        document.add(new Paragraph(" ").setFontSize(1).setMarginTop(4).setMarginBottom(0)
                 .setBorderBottom(new SolidBorder(redColor, 2.5f)));
-        document.add(new Paragraph(" ").setFontSize(1).setMarginBottom(14)
+        document.add(new Paragraph(" ").setFontSize(1).setMarginBottom(10)
                 .setBorderBottom(new SolidBorder(greenColor, 1.5f)));
 
         // ------------------------------------------------------------------
@@ -525,16 +529,16 @@ public class ExportService {
         // ------------------------------------------------------------------
         Table bandeau = new Table(UnitValue.createPercentArray(new float[]{52, 20, 28}))
                 .useAllAvailableWidth()
-                .setMarginBottom(14);
+                .setMarginBottom(6);
 
         bandeau.addCell(new com.itextpdf.layout.element.Cell()
                 .add(new Paragraph("CODE UNIQUE").setFontSize(8).setBold()
                         .setFontColor(ColorConstants.GRAY).setMarginBottom(2))
-                .add(new Paragraph(immo.getCodeUnique()).setFontSize(18).setBold()
+                .add(new Paragraph(immo.getCodeUnique()).setFontSize(16).setBold()
                         .setFontColor(greenColor))
                 .setBackgroundColor(BANDE_CLAIRE)
                 .setBorder(new SolidBorder(filetClair, 1))
-                .setPadding(10)
+                .setPadding(8)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE));
 
         bandeau.addCell(new com.itextpdf.layout.element.Cell()
@@ -547,17 +551,17 @@ public class ExportService {
                         .setFontColor(ColorConstants.WHITE))
                 .setBackgroundColor(couleurStatut(immo.getStatut()))
                 .setBorder(Border.NO_BORDER)
-                .setPadding(8)
+                .setPadding(6)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE));
 
         com.itextpdf.layout.element.Cell qrCell = new com.itextpdf.layout.element.Cell()
                 .setBorder(new SolidBorder(filetClair, 1))
-                .setPadding(6)
+                .setPadding(5)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE);
         Image qr = chargerImageUpload(immo.getQrCode());
         if (qr != null) {
             qrCell.add(new Paragraph()
-                    .add(qr.scaleToFit(58, 58))
+                    .add(qr.scaleToFit(48, 48))
                     .setTextAlignment(TextAlignment.CENTER));
         } else {
             qrCell.add(new Paragraph("QR code non généré").setFontSize(8)
@@ -568,12 +572,27 @@ public class ExportService {
         document.add(bandeau);
 
         // ------------------------------------------------------------------
-        // IDENTIFICATION : tableau d'identité + photo du bien
+        // CORPS DE LA FICHE EN DEUX COLONNES — pour tenir sur une seule page
         // ------------------------------------------------------------------
-        document.add(createSectionTitle("Identification", greenColor));
-        Table infoTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+        Table corps = new Table(UnitValue.createPercentArray(new float[]{50, 50}))
+                .useAllAvailableWidth()
+                .setMarginBottom(4);
+        com.itextpdf.layout.element.Cell colonneGauche = new com.itextpdf.layout.element.Cell()
+                .setBorder(Border.NO_BORDER)
+                .setPadding(0)
+                .setPaddingRight(8);
+        com.itextpdf.layout.element.Cell colonneDroite = new com.itextpdf.layout.element.Cell()
+                .setBorder(Border.NO_BORDER)
+                .setPadding(0)
+                .setPaddingLeft(8);
+
+        // ------------------------------------------------------------------
+        // COLONNE GAUCHE : Identification, Description, Dates, Valeurs
+        // ------------------------------------------------------------------
+        colonneGauche.add(createSectionTitle("Identification", greenColor));
+        Table infoTable = new Table(UnitValue.createPercentArray(new float[]{34, 66}))
                 .useAllAvailableWidth();
-        addPdfRow(infoTable, "Désignation", immo.getDesignation());
+        addPdfRow(infoTable, "Désignation", tronquer(immo.getDesignation(), MAX_DESIGNATION_PDF));
         addPdfRow(infoTable, "Type de matériel", immo.getTypeMateriel());
         addPdfRow(infoTable, "Marque", immo.getMarque());
         addPdfRow(infoTable, "État physique", translateEtatPhysique(immo.getEtatPhysique()));
@@ -581,55 +600,47 @@ public class ExportService {
 
         Image photo = chargerImageUpload(immo.getPhoto());
         if (photo != null) {
-            Table identification = new Table(UnitValue.createPercentArray(new float[]{68, 32}))
+            Table identification = new Table(UnitValue.createPercentArray(new float[]{62, 38}))
                     .useAllAvailableWidth();
             identification.addCell(new com.itextpdf.layout.element.Cell()
                     .add(infoTable)
                     .setBorder(Border.NO_BORDER)
-                    .setPadding(0));
+                    .setPadding(0)
+                    .setPaddingRight(6));
             identification.addCell(new com.itextpdf.layout.element.Cell()
                     .add(new Paragraph()
-                            .add(photo.scaleToFit(120, 120))
+                            .add(photo.scaleToFit(90, 90))
                             .setTextAlignment(TextAlignment.CENTER))
                     .add(new Paragraph("Photo du bien").setFontSize(7)
                             .setTextAlignment(TextAlignment.CENTER)
                             .setFontColor(ColorConstants.GRAY))
                     .setBorder(new SolidBorder(filetClair, 1))
-                    .setPadding(6));
-            document.add(identification);
+                    .setPadding(4));
+            colonneGauche.add(identification);
         } else {
-            document.add(infoTable);
+            colonneGauche.add(infoTable);
         }
-        document.add(new Paragraph("\n"));
 
-        // ------------------------------------------------------------------
-        // DESCRIPTION
-        // ------------------------------------------------------------------
-        document.add(createSectionTitle("Description", greenColor));
+        colonneGauche.add(createSectionTitle("Description", greenColor)
+                .setMarginTop(8));
         String description = (immo.getDescription() != null && !immo.getDescription().isBlank())
-                ? immo.getDescription()
+                ? tronquer(immo.getDescription(), MAX_DESCRIPTION_PDF)
                 : "Aucune description renseignée.";
-        document.add(new Paragraph(description).setFontSize(10).setMarginBottom(4));
-        document.add(new Paragraph("\n"));
+        colonneGauche.add(new Paragraph(description).setFontSize(10).setMarginBottom(0));
 
-        // ------------------------------------------------------------------
-        // DATES
-        // ------------------------------------------------------------------
-        document.add(createSectionTitle("Dates", greenColor));
-        Table datesTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+        colonneGauche.add(createSectionTitle("Dates", greenColor)
+                .setMarginTop(8));
+        Table datesTable = new Table(UnitValue.createPercentArray(new float[]{40, 60}))
                 .useAllAvailableWidth();
         addPdfRow(datesTable, "Date d'acquisition",
                 immo.getDateAcquisition() != null ? immo.getDateAcquisition().format(DATE_FORMAT) : "-");
         addPdfRow(datesTable, "Date de mise en service",
                 immo.getDateMiseService() != null ? immo.getDateMiseService().format(DATE_FORMAT) : "-");
-        document.add(datesTable);
-        document.add(new Paragraph("\n"));
+        colonneGauche.add(datesTable);
 
-        // ------------------------------------------------------------------
-        // VALEURS ET AMORTISSEMENT
-        // ------------------------------------------------------------------
-        document.add(createSectionTitle("Valeurs et amortissement", greenColor));
-        Table valeursTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+        colonneGauche.add(createSectionTitle("Valeurs et amortissement", greenColor)
+                .setMarginTop(8));
+        Table valeursTable = new Table(UnitValue.createPercentArray(new float[]{40, 60}))
                 .useAllAvailableWidth();
         addPdfRow(valeursTable, "Valeur d'achat", formatMontant(immo.getValeurAchat()));
         addPdfRow(valeursTable, "Taux d'amortissement", immo.getTauxAmortissement() + " %");
@@ -639,14 +650,13 @@ public class ExportService {
         } catch (Exception e) {
             addPdfRow(valeursTable, "VNC actuelle", "Non calculable");
         }
-        document.add(valeursTable);
-        document.add(new Paragraph("\n"));
+        colonneGauche.add(valeursTable);
 
         // ------------------------------------------------------------------
-        // AFFECTATION
+        // COLONNE DROITE : Affectation, Historique, Édité par
         // ------------------------------------------------------------------
-        document.add(createSectionTitle("Affectation", greenColor));
-        Table affectationTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+        colonneDroite.add(createSectionTitle("Affectation", greenColor));
+        Table affectationTable = new Table(UnitValue.createPercentArray(new float[]{38, 62}))
                 .useAllAvailableWidth();
         addPdfRow(affectationTable, "Agence",
                 immo.getAgence() != null ? immo.getAgence().getNomAgence() : "-");
@@ -656,25 +666,22 @@ public class ExportService {
                 immo.getCategorie() != null ? immo.getCategorie().getNomCategorie() : "-");
         addPdfRow(affectationTable, "Fournisseur",
                 immo.getFournisseur() != null ? immo.getFournisseur().getNomFournisseur() : "-");
-        document.add(affectationTable);
-        document.add(new Paragraph("\n"));
+        colonneDroite.add(affectationTable);
 
-        // ------------------------------------------------------------------
-        // HISTORIQUE DES MOUVEMENTS (5 derniers)
-        // ------------------------------------------------------------------
-        document.add(createSectionTitle("Historique des mouvements", greenColor));
+        colonneDroite.add(createSectionTitle("Historique des mouvements", greenColor)
+                .setMarginTop(8));
         List<Mouvement> mouvements = mouvementRepository
                 .findByImmobilisationIdOrderByDateMouvementDesc(immo.getId(), null);
         if (mouvements.isEmpty()) {
-            document.add(new Paragraph("Aucun mouvement enregistré pour ce bien.")
+            colonneDroite.add(new Paragraph("Aucun mouvement enregistré pour ce bien.")
                     .setFontSize(10).setFontColor(ColorConstants.GRAY));
         } else {
-            Table historique = new Table(UnitValue.createPercentArray(new float[]{20, 18, 31, 31}))
+            Table historique = new Table(UnitValue.createPercentArray(new float[]{24, 20, 28, 28}))
                     .useAllAvailableWidth();
             addPdfHeaderCell(historique, "Date", greenColor);
             addPdfHeaderCell(historique, "Type", greenColor);
-            addPdfHeaderCell(historique, "Localisation de départ", greenColor);
-            addPdfHeaderCell(historique, "Localisation d'arrivée", greenColor);
+            addPdfHeaderCell(historique, "Départ", greenColor);
+            addPdfHeaderCell(historique, "Arrivée", greenColor);
 
             List<Mouvement> derniers = mouvements.stream().limit(NB_MOUVEMENTS_FICHE).toList();
             for (int i = 0; i < derniers.size(); i++) {
@@ -687,21 +694,18 @@ public class ExportService {
                 historique.addCell(ligneHistorique(texteOuTiret(mvt.getAncienneLocalisation()), bande));
                 historique.addCell(ligneHistorique(texteOuTiret(mvt.getNouvelleLocalisation()), bande));
             }
-            document.add(historique);
+            colonneDroite.add(historique);
 
             if (mouvements.size() > NB_MOUVEMENTS_FICHE) {
-                document.add(new Paragraph("… et " + (mouvements.size() - NB_MOUVEMENTS_FICHE)
-                                + " autre(s) mouvement(s) — détail disponible dans l'application.")
+                colonneDroite.add(new Paragraph("… et " + (mouvements.size() - NB_MOUVEMENTS_FICHE)
+                                + " autre(s) mouvement(s) — détail dans l'application.")
                         .setFontSize(8).setFontColor(ColorConstants.GRAY).setMarginTop(4));
             }
         }
-        document.add(new Paragraph("\n"));
 
-        // ------------------------------------------------------------------
-        // ÉDITÉ PAR
-        // ------------------------------------------------------------------
-        document.add(createSectionTitle("Édité par", greenColor));
-        Table editeur = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+        colonneDroite.add(createSectionTitle("Édité par", greenColor)
+                .setMarginTop(8));
+        Table editeur = new Table(UnitValue.createPercentArray(new float[]{38, 62}))
                 .useAllAvailableWidth();
         String nomEditeur = ((user.getPrenom() != null ? user.getPrenom() : "") + " "
                 + (user.getNom() != null ? user.getNom() : "")).trim();
@@ -710,13 +714,17 @@ public class ExportService {
                         + " (" + user.getNomUtilisateur() + ")");
         addPdfRow(editeur, "Rôle", user.getRole() != null ? translateRole(user.getRole()) : "-");
         addPdfRow(editeur, "Date d'édition", LocalDateTime.now().format(DATETIME_FORMAT));
-        document.add(editeur);
+        colonneDroite.add(editeur);
+
+        corps.addCell(colonneGauche);
+        corps.addCell(colonneDroite);
+        document.add(corps);
 
         // ------------------------------------------------------------------
         // PIED DE PAGE DU DOCUMENT (mention — la pagination est au trait)
         // ------------------------------------------------------------------
-        document.add(new Paragraph("\n"));
-        document.add(new Paragraph().setBorderTop(new SolidBorder(greenColor, 1)));
+        document.add(new Paragraph().setBorderTop(new SolidBorder(greenColor, 1))
+                .setFontSize(1).setMarginBottom(1));
         document.add(new Paragraph("Document généré automatiquement par le Système de Gestion des Immobilisations AUXIMAD")
                 .setFontSize(8).setFontColor(ColorConstants.GRAY).setTextAlignment(TextAlignment.CENTER));
     }
@@ -948,6 +956,18 @@ public class ExportService {
 
     private String texteOuTiret(String valeur) {
         return (valeur == null || valeur.isBlank()) ? "-" : valeur;
+    }
+
+    /**
+     * Tronque un texte libre (désignation, description) pour garantir que la
+     * fiche reste sur une seule page. Le texte complet reste consultable dans
+     * l'application.
+     */
+    private String tronquer(String texte, int max) {
+        if (texte == null || texte.length() <= max) {
+            return texte;
+        }
+        return texte.substring(0, max).trim() + "…";
     }
 
     /**
