@@ -2,16 +2,23 @@ package com.auximad.gestion_immobilisation.service;
 
 import com.auximad.gestion_immobilisation.dto.DemandeDto;
 import com.auximad.gestion_immobilisation.model.Immobilisation;
+import com.auximad.gestion_immobilisation.model.Mouvement;
 import com.auximad.gestion_immobilisation.model.Utilisateur;
 import com.auximad.gestion_immobilisation.repository.CampagneInventaireRepository;
 import com.auximad.gestion_immobilisation.repository.ImmobilisationRepository;
 import com.auximad.gestion_immobilisation.repository.LigneInventaireRepository;
 import com.auximad.gestion_immobilisation.repository.MouvementRepository;
+import com.itextpdf.io.font.constants.StandardFonts;
 import com.itextpdf.io.image.ImageDataFactory;
 import com.itextpdf.kernel.colors.ColorConstants;
 import com.itextpdf.kernel.colors.DeviceRgb;
+import com.itextpdf.kernel.events.IEventHandler;
+import com.itextpdf.kernel.events.PdfDocumentEvent;
+import com.itextpdf.kernel.font.PdfFont;
+import com.itextpdf.kernel.font.PdfFontFactory;
 import com.itextpdf.kernel.pdf.PdfDocument;
 import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
 import com.itextpdf.layout.Document;
 import com.itextpdf.layout.borders.Border;
 import com.itextpdf.layout.borders.SolidBorder;
@@ -24,6 +31,8 @@ import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.*;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,7 +40,9 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.time.LocalDate;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -50,6 +61,21 @@ public class ExportService {
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
     private static final DateTimeFormatter DATETIME_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+
+    /** Répertoire des fichiers uploadés (photos, QR codes) — même clé que {@code FileStorageService}. */
+    @Value("${file.upload-dir:uploads}")
+    private String uploadDir;
+
+    /** Marges de la fiche PDF, en points (1 pt ≈ 0,35 mm). */
+    private static final float MARGE_HAUTE = 38f;
+    private static final float MARGE_COTE = 42f;
+    private static final float MARGE_BASSE = 54f;
+
+    /** Nombre de mouvements affichés dans l'historique de la fiche. */
+    private static final int NB_MOUVEMENTS_FICHE = 5;
+
+    /** Fond des bandes alternées des tableaux de la fiche. */
+    private static final com.itextpdf.kernel.colors.Color BANDE_CLAIRE = new DeviceRgb(248, 250, 252);
 
     // ========================================================================
     // EXPORT EXCEL - LISTE DES IMMOBILISATIONS
@@ -379,8 +405,17 @@ public class ExportService {
 
     /**
      * Fiche PDF d'une immobilisation.
-     * Vérifie le périmètre avant tout — sinon un employé téléchargerait la
-     * fiche de n'importe quel bien de l'entreprise.
+     *
+     * <p>Vérifie le périmètre avant tout — sinon un employé téléchargerait la
+     * fiche de n'importe quel bien de l'entreprise. La fiche comprend le logo
+     * AUXIMAD, un bandeau d'identité (code unique, pastille de statut, QR
+     * code), la photo du bien, l'historique des mouvements, l'auteur de
+     * l'édition et un pied de page paginé « Page x / y ».</p>
+     *
+     * <p>Le document est construit en deux passes : la première (sur un jeton
+     * jetable) dénombre les pages, la seconde produit le fichier avec une
+     * pagination exacte — iText ne connaît le total des pages qu'une fois le
+     * document terminé.</p>
      */
     @Transactional(readOnly = true)
     public ByteArrayInputStream exportFicheImmobilisationPdf(Long immobilisationId, Utilisateur user) {
@@ -391,92 +426,31 @@ public class ExportService {
                 immobilisationRepository.findById(immobilisationId), user);
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            PdfWriter writer = new PdfWriter(out);
-            PdfDocument pdf = new PdfDocument(writer);
-            Document document = new Document(pdf);
-
-            com.itextpdf.kernel.colors.Color greenColor = new DeviceRgb(0, 150, 64);
-            com.itextpdf.kernel.colors.Color redColor = new DeviceRgb(227, 6, 19);
-            com.itextpdf.kernel.colors.Color darkColor = new DeviceRgb(30, 41, 59);
-
-            // EN-TÊTE
-            Table headerTable = new Table(UnitValue.createPercentArray(new float[]{20, 60, 20}))
-                    .useAllAvailableWidth();
-
-            headerTable.addCell(new com.itextpdf.layout.element.Cell()
-                    .add(new Paragraph("AUXIMAD").setFontSize(20).setBold().setFontColor(redColor))
-                    .setBorder(Border.NO_BORDER));
-
-            headerTable.addCell(new com.itextpdf.layout.element.Cell()
-                    .add(new Paragraph("FICHE D'IMMOBILISATION")
-                            .setFontSize(16).setBold().setTextAlignment(TextAlignment.CENTER).setFontColor(darkColor))
-                    .setBorder(Border.NO_BORDER));
-
-            headerTable.addCell(new com.itextpdf.layout.element.Cell()
-                    .add(new Paragraph(LocalDate.now().format(DATE_FORMAT))
-                            .setFontSize(10).setTextAlignment(TextAlignment.RIGHT))
-                    .setBorder(Border.NO_BORDER));
-
-            document.add(headerTable);
-            document.add(new Paragraph().setBorderBottom(new SolidBorder(greenColor, 3)).setMarginBottom(15));
-
-            // CODE UNIQUE
-            document.add(new Paragraph("CODE UNIQUE : " + immo.getCodeUnique())
-                    .setFontSize(14).setBold().setFontColor(greenColor).setMarginBottom(15));
-
-            // IDENTIFICATION
-            document.add(createSectionTitle("Identification", greenColor));
-            Table infoTable = new Table(UnitValue.createPercentArray(new float[]{30, 70})).useAllAvailableWidth();
-            addPdfRow(infoTable, "Désignation", immo.getDesignation());
-            addPdfRow(infoTable, "Type de matériel", immo.getTypeMateriel());
-            addPdfRow(infoTable, "Marque", immo.getMarque());
-            addPdfRow(infoTable, "État physique", translateEtatPhysique(immo.getEtatPhysique()));
-            addPdfRow(infoTable, "Statut", translateStatut(immo.getStatut()));
-            document.add(infoTable);
-            document.add(new Paragraph("\n"));
-
-            // DATES
-            document.add(createSectionTitle("Dates", greenColor));
-            Table datesTable = new Table(UnitValue.createPercentArray(new float[]{30, 70})).useAllAvailableWidth();
-            addPdfRow(datesTable, "Date d'acquisition",
-                    immo.getDateAcquisition() != null ? immo.getDateAcquisition().format(DATE_FORMAT) : "-");
-            addPdfRow(datesTable, "Date de mise en service",
-                    immo.getDateMiseService() != null ? immo.getDateMiseService().format(DATE_FORMAT) : "-");
-            document.add(datesTable);
-            document.add(new Paragraph("\n"));
-
-            // VALEURS
-            document.add(createSectionTitle("Valeurs et amortissement", greenColor));
-            Table valeursTable = new Table(UnitValue.createPercentArray(new float[]{30, 70})).useAllAvailableWidth();
-            addPdfRow(valeursTable, "Valeur d'achat", formatMontant(immo.getValeurAchat()));
-            addPdfRow(valeursTable, "Taux d'amortissement", immo.getTauxAmortissement() + " %");
-            try {
-                BigDecimal vnc = amortissementService.calculerVncActuelle(immo.getId());
-                addPdfRow(valeursTable, "VNC actuelle", formatMontant(vnc));
-            } catch (Exception e) {
-                addPdfRow(valeursTable, "VNC actuelle", "Non calculable");
+            // Passe 1 (jeton jetable) : dénombre les pages pour la pagination.
+            int totalPages;
+            try (ByteArrayOutputStream jeton = new ByteArrayOutputStream()) {
+                PdfDocument docJeton = new PdfDocument(new PdfWriter(jeton));
+                Document passe = new Document(docJeton);
+                passe.setMargins(MARGE_HAUTE, MARGE_COTE, MARGE_BASSE, MARGE_COTE);
+                remplirFiche(passe, immo, user);
+                totalPages = docJeton.getNumberOfPages();
+                passe.close();
             }
-            document.add(valeursTable);
-            document.add(new Paragraph("\n"));
 
-            // AFFECTATION
-            document.add(createSectionTitle("Affectation", greenColor));
-            Table affectationTable = new Table(UnitValue.createPercentArray(new float[]{30, 70})).useAllAvailableWidth();
-            addPdfRow(affectationTable, "Agence",
-                    immo.getAgence() != null ? immo.getAgence().getNomAgence() : "-");
-            addPdfRow(affectationTable, "Service",
-                    immo.getService() != null ? immo.getService().getNomService() : "-");
-            addPdfRow(affectationTable, "Catégorie",
-                    immo.getCategorie() != null ? immo.getCategorie().getNomCategorie() : "-");
-            addPdfRow(affectationTable, "Fournisseur",
-                    immo.getFournisseur() != null ? immo.getFournisseur().getNomFournisseur() : "-");
-            document.add(affectationTable);
+            // Passe 2 : document final avec métadonnées et pied de page paginé.
+            PdfDocument pdf = new PdfDocument(new PdfWriter(out));
+            Document document = new Document(pdf);
+            document.setMargins(MARGE_HAUTE, MARGE_COTE, MARGE_BASSE, MARGE_COTE);
 
-            // PIED DE PAGE
-            document.add(new Paragraph("\n"));
-            document.add(new Paragraph().setBorderTop(new SolidBorder(greenColor, 1)));
-            document.add(new Paragraph("Document généré automatiquement par le Système de Gestion des Immobilisations AUXIMAD")
-                    .setFontSize(8).setFontColor(ColorConstants.GRAY).setTextAlignment(TextAlignment.CENTER));
+            pdf.getDocumentInfo()
+                    .setTitle("Fiche immobilisation " + immo.getCodeUnique())
+                    .setAuthor("AUXIMAD")
+                    .setSubject("Fiche d'immobilisation — " + immo.getDesignation())
+                    .setCreator("Système de Gestion des Immobilisations AUXIMAD");
+            pdf.addEventHandler(PdfDocumentEvent.END_PAGE,
+                    piedDePage(immo.getCodeUnique(), totalPages));
+
+            remplirFiche(document, immo, user);
 
             document.close();
             return new ByteArrayInputStream(out.toByteArray());
@@ -484,6 +458,267 @@ public class ExportService {
         } catch (Exception e) {
             throw new RuntimeException("Erreur lors de la génération du PDF", e);
         }
+    }
+
+    /**
+     * Construit l'intégralité du contenu de la fiche (sans pied de page) :
+     * en-tête, bandeau d'identité, identification, description, dates,
+     * valeurs, affectation, historique des mouvements et éditeur.
+     */
+    private void remplirFiche(Document document, Immobilisation immo, Utilisateur user) {
+        com.itextpdf.kernel.colors.Color greenColor = new DeviceRgb(0, 150, 64);
+        com.itextpdf.kernel.colors.Color redColor = new DeviceRgb(227, 6, 19);
+        com.itextpdf.kernel.colors.Color darkColor = new DeviceRgb(30, 41, 59);
+        com.itextpdf.kernel.colors.Color filetClair = new DeviceRgb(226, 232, 240);
+
+        // ------------------------------------------------------------------
+        // EN-TÊTE : logo + marque | titre | date d'édition et référence
+        // ------------------------------------------------------------------
+        Table headerTable = new Table(UnitValue.createPercentArray(new float[]{34, 42, 24}))
+                .useAllAvailableWidth();
+
+        com.itextpdf.layout.element.Cell marqueCell = new com.itextpdf.layout.element.Cell()
+                .setBorder(Border.NO_BORDER)
+                .setPadding(0);
+        Image logo = chargerImageClasspath("static/logo_auximad.png");
+        if (logo != null) {
+            marqueCell.add(new Paragraph()
+                    .add(logo.scaleToFit(44, 44))
+                    .setMarginBottom(2));
+        }
+        marqueCell.add(new Paragraph("AUXIMAD").setFontSize(19).setBold().setFontColor(redColor));
+        marqueCell.add(new Paragraph("Gestion des Immobilisations")
+                .setFontSize(8).setFontColor(ColorConstants.GRAY));
+        headerTable.addCell(marqueCell);
+
+        headerTable.addCell(new com.itextpdf.layout.element.Cell()
+                .add(new Paragraph("FICHE D'IMMOBILISATION")
+                        .setFontSize(15).setBold()
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setFontColor(darkColor)
+                        .setMarginTop(6))
+                .add(new Paragraph("Détail du bien, valeurs et historique")
+                        .setFontSize(8)
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setFontColor(ColorConstants.GRAY))
+                .setBorder(Border.NO_BORDER));
+
+        headerTable.addCell(new com.itextpdf.layout.element.Cell()
+                .add(new Paragraph("Éditée le " + LocalDateTime.now().format(DATETIME_FORMAT))
+                        .setFontSize(9).setTextAlignment(TextAlignment.RIGHT))
+                .add(new Paragraph("Réf. " + immo.getCodeUnique())
+                        .setFontSize(9).setBold()
+                        .setTextAlignment(TextAlignment.RIGHT)
+                        .setFontColor(greenColor))
+                .setBorder(Border.NO_BORDER));
+
+        document.add(headerTable);
+
+        // Filet bicolore aux couleurs de la marque
+        document.add(new Paragraph(" ").setFontSize(1).setMarginTop(6).setMarginBottom(0)
+                .setBorderBottom(new SolidBorder(redColor, 2.5f)));
+        document.add(new Paragraph(" ").setFontSize(1).setMarginBottom(14)
+                .setBorderBottom(new SolidBorder(greenColor, 1.5f)));
+
+        // ------------------------------------------------------------------
+        // BANDEAU D'IDENTITÉ : code unique + pastille de statut + QR code
+        // ------------------------------------------------------------------
+        Table bandeau = new Table(UnitValue.createPercentArray(new float[]{52, 20, 28}))
+                .useAllAvailableWidth()
+                .setMarginBottom(14);
+
+        bandeau.addCell(new com.itextpdf.layout.element.Cell()
+                .add(new Paragraph("CODE UNIQUE").setFontSize(8).setBold()
+                        .setFontColor(ColorConstants.GRAY).setMarginBottom(2))
+                .add(new Paragraph(immo.getCodeUnique()).setFontSize(18).setBold()
+                        .setFontColor(greenColor))
+                .setBackgroundColor(BANDE_CLAIRE)
+                .setBorder(new SolidBorder(filetClair, 1))
+                .setPadding(10)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE));
+
+        bandeau.addCell(new com.itextpdf.layout.element.Cell()
+                .add(new Paragraph("STATUT").setFontSize(7).setBold()
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setFontColor(ColorConstants.WHITE).setMarginBottom(1))
+                .add(new Paragraph(translateStatut(immo.getStatut()))
+                        .setFontSize(11).setBold()
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setFontColor(ColorConstants.WHITE))
+                .setBackgroundColor(couleurStatut(immo.getStatut()))
+                .setBorder(Border.NO_BORDER)
+                .setPadding(8)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE));
+
+        com.itextpdf.layout.element.Cell qrCell = new com.itextpdf.layout.element.Cell()
+                .setBorder(new SolidBorder(filetClair, 1))
+                .setPadding(6)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE);
+        Image qr = chargerImageUpload(immo.getQrCode());
+        if (qr != null) {
+            qrCell.add(new Paragraph()
+                    .add(qr.scaleToFit(58, 58))
+                    .setTextAlignment(TextAlignment.CENTER));
+        } else {
+            qrCell.add(new Paragraph("QR code non généré").setFontSize(8)
+                    .setFontColor(ColorConstants.GRAY)
+                    .setTextAlignment(TextAlignment.CENTER));
+        }
+        bandeau.addCell(qrCell);
+        document.add(bandeau);
+
+        // ------------------------------------------------------------------
+        // IDENTIFICATION : tableau d'identité + photo du bien
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Identification", greenColor));
+        Table infoTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+                .useAllAvailableWidth();
+        addPdfRow(infoTable, "Désignation", immo.getDesignation());
+        addPdfRow(infoTable, "Type de matériel", immo.getTypeMateriel());
+        addPdfRow(infoTable, "Marque", immo.getMarque());
+        addPdfRow(infoTable, "État physique", translateEtatPhysique(immo.getEtatPhysique()));
+        addPdfRow(infoTable, "Statut", translateStatut(immo.getStatut()));
+
+        Image photo = chargerImageUpload(immo.getPhoto());
+        if (photo != null) {
+            Table identification = new Table(UnitValue.createPercentArray(new float[]{68, 32}))
+                    .useAllAvailableWidth();
+            identification.addCell(new com.itextpdf.layout.element.Cell()
+                    .add(infoTable)
+                    .setBorder(Border.NO_BORDER)
+                    .setPadding(0));
+            identification.addCell(new com.itextpdf.layout.element.Cell()
+                    .add(new Paragraph()
+                            .add(photo.scaleToFit(120, 120))
+                            .setTextAlignment(TextAlignment.CENTER))
+                    .add(new Paragraph("Photo du bien").setFontSize(7)
+                            .setTextAlignment(TextAlignment.CENTER)
+                            .setFontColor(ColorConstants.GRAY))
+                    .setBorder(new SolidBorder(filetClair, 1))
+                    .setPadding(6));
+            document.add(identification);
+        } else {
+            document.add(infoTable);
+        }
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // DESCRIPTION
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Description", greenColor));
+        String description = (immo.getDescription() != null && !immo.getDescription().isBlank())
+                ? immo.getDescription()
+                : "Aucune description renseignée.";
+        document.add(new Paragraph(description).setFontSize(10).setMarginBottom(4));
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // DATES
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Dates", greenColor));
+        Table datesTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+                .useAllAvailableWidth();
+        addPdfRow(datesTable, "Date d'acquisition",
+                immo.getDateAcquisition() != null ? immo.getDateAcquisition().format(DATE_FORMAT) : "-");
+        addPdfRow(datesTable, "Date de mise en service",
+                immo.getDateMiseService() != null ? immo.getDateMiseService().format(DATE_FORMAT) : "-");
+        document.add(datesTable);
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // VALEURS ET AMORTISSEMENT
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Valeurs et amortissement", greenColor));
+        Table valeursTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+                .useAllAvailableWidth();
+        addPdfRow(valeursTable, "Valeur d'achat", formatMontant(immo.getValeurAchat()));
+        addPdfRow(valeursTable, "Taux d'amortissement", immo.getTauxAmortissement() + " %");
+        try {
+            BigDecimal vnc = amortissementService.calculerVncActuelle(immo.getId());
+            addPdfRow(valeursTable, "VNC actuelle", formatMontant(vnc));
+        } catch (Exception e) {
+            addPdfRow(valeursTable, "VNC actuelle", "Non calculable");
+        }
+        document.add(valeursTable);
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // AFFECTATION
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Affectation", greenColor));
+        Table affectationTable = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+                .useAllAvailableWidth();
+        addPdfRow(affectationTable, "Agence",
+                immo.getAgence() != null ? immo.getAgence().getNomAgence() : "-");
+        addPdfRow(affectationTable, "Service",
+                immo.getService() != null ? immo.getService().getNomService() : "-");
+        addPdfRow(affectationTable, "Catégorie",
+                immo.getCategorie() != null ? immo.getCategorie().getNomCategorie() : "-");
+        addPdfRow(affectationTable, "Fournisseur",
+                immo.getFournisseur() != null ? immo.getFournisseur().getNomFournisseur() : "-");
+        document.add(affectationTable);
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // HISTORIQUE DES MOUVEMENTS (5 derniers)
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Historique des mouvements", greenColor));
+        List<Mouvement> mouvements = mouvementRepository
+                .findByImmobilisationIdOrderByDateMouvementDesc(immo.getId(), null);
+        if (mouvements.isEmpty()) {
+            document.add(new Paragraph("Aucun mouvement enregistré pour ce bien.")
+                    .setFontSize(10).setFontColor(ColorConstants.GRAY));
+        } else {
+            Table historique = new Table(UnitValue.createPercentArray(new float[]{20, 18, 31, 31}))
+                    .useAllAvailableWidth();
+            addPdfHeaderCell(historique, "Date", greenColor);
+            addPdfHeaderCell(historique, "Type", greenColor);
+            addPdfHeaderCell(historique, "Localisation de départ", greenColor);
+            addPdfHeaderCell(historique, "Localisation d'arrivée", greenColor);
+
+            List<Mouvement> derniers = mouvements.stream().limit(NB_MOUVEMENTS_FICHE).toList();
+            for (int i = 0; i < derniers.size(); i++) {
+                Mouvement mvt = derniers.get(i);
+                com.itextpdf.kernel.colors.Color bande = i % 2 == 0 ? BANDE_CLAIRE : ColorConstants.WHITE;
+                historique.addCell(ligneHistorique(
+                        mvt.getDateMouvement() != null ? mvt.getDateMouvement().format(DATETIME_FORMAT) : "-",
+                        bande));
+                historique.addCell(ligneHistorique(translateTypeMouvement(mvt.getTypeMouvement()), bande));
+                historique.addCell(ligneHistorique(texteOuTiret(mvt.getAncienneLocalisation()), bande));
+                historique.addCell(ligneHistorique(texteOuTiret(mvt.getNouvelleLocalisation()), bande));
+            }
+            document.add(historique);
+
+            if (mouvements.size() > NB_MOUVEMENTS_FICHE) {
+                document.add(new Paragraph("… et " + (mouvements.size() - NB_MOUVEMENTS_FICHE)
+                                + " autre(s) mouvement(s) — détail disponible dans l'application.")
+                        .setFontSize(8).setFontColor(ColorConstants.GRAY).setMarginTop(4));
+            }
+        }
+        document.add(new Paragraph("\n"));
+
+        // ------------------------------------------------------------------
+        // ÉDITÉ PAR
+        // ------------------------------------------------------------------
+        document.add(createSectionTitle("Édité par", greenColor));
+        Table editeur = new Table(UnitValue.createPercentArray(new float[]{32, 68}))
+                .useAllAvailableWidth();
+        String nomEditeur = ((user.getPrenom() != null ? user.getPrenom() : "") + " "
+                + (user.getNom() != null ? user.getNom() : "")).trim();
+        addPdfRow(editeur, "Utilisateur",
+                (nomEditeur.isEmpty() ? user.getNomUtilisateur() : nomEditeur)
+                        + " (" + user.getNomUtilisateur() + ")");
+        addPdfRow(editeur, "Rôle", user.getRole() != null ? translateRole(user.getRole()) : "-");
+        addPdfRow(editeur, "Date d'édition", LocalDateTime.now().format(DATETIME_FORMAT));
+        document.add(editeur);
+
+        // ------------------------------------------------------------------
+        // PIED DE PAGE DU DOCUMENT (mention — la pagination est au trait)
+        // ------------------------------------------------------------------
+        document.add(new Paragraph("\n"));
+        document.add(new Paragraph().setBorderTop(new SolidBorder(greenColor, 1)));
+        document.add(new Paragraph("Document généré automatiquement par le Système de Gestion des Immobilisations AUXIMAD")
+                .setFontSize(8).setFontColor(ColorConstants.GRAY).setTextAlignment(TextAlignment.CENTER));
     }
 
     // ========================================================================
@@ -679,14 +914,19 @@ public class ExportService {
     }
 
     private void addPdfRow(Table table, String label, String value) {
+        // Bandes alternées : la ligne paire prend un fond clair (lecture facilitée).
+        com.itextpdf.kernel.colors.Color bande = table.getNumberOfRows() % 2 == 0
+                ? BANDE_CLAIRE : ColorConstants.WHITE;
         table.addCell(new com.itextpdf.layout.element.Cell()
                 .add(new Paragraph(label).setBold().setFontSize(10))
                 .setBorder(Border.NO_BORDER)
-                .setPaddingBottom(3));
+                .setBackgroundColor(bande)
+                .setPadding(4));
         table.addCell(new com.itextpdf.layout.element.Cell()
                 .add(new Paragraph(value != null ? value : "-").setFontSize(10))
                 .setBorder(Border.NO_BORDER)
-                .setPaddingBottom(3));
+                .setBackgroundColor(bande)
+                .setPadding(4));
     }
 
     private void addPdfHeaderCell(Table table, String text, com.itextpdf.kernel.colors.Color color) {
@@ -694,6 +934,124 @@ public class ExportService {
                 .add(new Paragraph(text).setBold().setFontColor(ColorConstants.WHITE).setFontSize(9))
                 .setBackgroundColor(color)
                 .setPadding(5));
+    }
+
+    /** Cellule de l'historique des mouvements (fond de bande alternée). */
+    private com.itextpdf.layout.element.Cell ligneHistorique(
+            String texte, com.itextpdf.kernel.colors.Color bande) {
+        return new com.itextpdf.layout.element.Cell()
+                .add(new Paragraph(texte).setFontSize(9))
+                .setBorder(Border.NO_BORDER)
+                .setBackgroundColor(bande)
+                .setPadding(4);
+    }
+
+    private String texteOuTiret(String valeur) {
+        return (valeur == null || valeur.isBlank()) ? "-" : valeur;
+    }
+
+    /**
+     * Charge une image des ressources embarquées (logo de la marque).
+     * Retourne {@code null} si le fichier est absent : l'export ne casse jamais.
+     */
+    private Image chargerImageClasspath(String chemin) {
+        try {
+            byte[] donnees = new ClassPathResource(chemin).getContentAsByteArray();
+            return new Image(ImageDataFactory.create(donnees));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Charge une image uploadée (photo du bien, QR code) depuis le disque.
+     * Les URLs stockées en base sont relatives ({@code /uploads/...}) et
+     * pointent sous {@code file.upload-dir}. Retourne {@code null} si le
+     * fichier n'existe pas ; le chemin reste confiné au répertoire d'upload.
+     */
+    private Image chargerImageUpload(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        try {
+            String relatif = url.startsWith("/uploads/")
+                    ? url.substring("/uploads/".length())
+                    : url.replaceFirst("^/+", "");
+            Path base = Paths.get(uploadDir).toAbsolutePath().normalize();
+            Path fichier = base.resolve(relatif).normalize();
+            if (!fichier.startsWith(base) || !Files.isRegularFile(fichier)) {
+                return null;
+            }
+            return new Image(ImageDataFactory.create(fichier.toString()));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Couleur de la pastille de statut aux couleurs de l'application. */
+    private com.itextpdf.kernel.colors.Color couleurStatut(String statut) {
+        if (statut == null) return new DeviceRgb(100, 116, 139);
+        return switch (statut) {
+            case "ACTIF" -> new DeviceRgb(0, 150, 64);
+            case "CEDE" -> new DeviceRgb(245, 158, 11);
+            case "REBUTE" -> new DeviceRgb(227, 6, 19);
+            default -> new DeviceRgb(100, 116, 139);
+        };
+    }
+
+    private String translateRole(com.auximad.gestion_immobilisation.model.Role role) {
+        return switch (role) {
+            case ADMIN -> "Administrateur";
+            case EMPLOYE -> "Employé";
+        };
+    }
+
+    /**
+     * Pied de page de chaque page : référence à gauche, pagination exacte
+     * « Page x / y » au centre, date d'édition à droite.
+     *
+     * <p>Un échec ici est purement décoratif : il ne doit jamais faire
+     * échouer la génération du document.</p>
+     */
+    private IEventHandler piedDePage(String codeUnique, int totalPages) {
+        String dateEdition = LocalDateTime.now().format(DATETIME_FORMAT);
+        return evenement -> {
+            try {
+                PdfDocumentEvent evt = (PdfDocumentEvent) evenement;
+                var page = evt.getPage();
+                var cadre = page.getPageSize();
+                float y = cadre.getBottom() + 20;
+                float xGauche = cadre.getLeft() + MARGE_COTE;
+                float xDroite = cadre.getRight() - MARGE_COTE;
+
+                String gauche = "AUXIMAD · Fiche " + codeUnique;
+                String centre = "Page " + evt.getDocument().getPageNumber(page) + " / " + totalPages;
+                String droite = "Éditée le " + dateEdition;
+
+                PdfFont fonte = PdfFontFactory.createFont(StandardFonts.HELVETICA);
+                PdfCanvas canvas = new PdfCanvas(
+                        page.newContentStreamAfter(), page.getResources(), evt.getDocument());
+                canvas.saveState();
+                canvas.setFillColor(new DeviceRgb(100, 116, 139));
+
+                canvas.beginText().setFontAndSize(fonte, 8)
+                        .moveText(xGauche, y).showText(gauche).endText();
+
+                float largeurCentre = fonte.getWidth(centre, 8);
+                canvas.beginText().setFontAndSize(fonte, 8)
+                        .moveText((cadre.getLeft() + cadre.getRight()) / 2f - largeurCentre / 2f, y)
+                        .showText(centre).endText();
+
+                float largeurDroite = fonte.getWidth(droite, 8);
+                canvas.beginText().setFontAndSize(fonte, 8)
+                        .moveText(xDroite - largeurDroite, y).showText(droite).endText();
+
+                canvas.restoreState();
+                canvas.release();
+            } catch (Exception ignore) {
+                // Décoratif : jamais bloquant pour l'export.
+            }
+        };
     }
 
     // ========================================================================
